@@ -91,9 +91,13 @@ public class ImportService {
         }
     }
 
+    @Transactional
     private void processImportAsync(ImportJob job, Path filePath) {
         try {
+            logger.info("Processing import job: {}, file: {}", job.getId(), job.getFilename());
+            
             List<FileBasedSpeedRepository.DataSource> dataSources = fileBasedSpeedRepository.getDataSources();
+            logger.info("Found {} data sources", dataSources.size());
             
             int totalRows = 0;
             int successRows = 0;
@@ -105,16 +109,19 @@ public class ImportService {
                     totalRows = source.getTotalRoads() * source.getTotalDays() * 144;
                     successRows = totalRows;
                     
+                    logger.info("Creating {} road segments for file: {}", source.getTotalRoads(), source.getFilename());
+                    
                     for (int roadId = 1; roadId <= source.getTotalRoads(); roadId++) {
                         if (!roadSegmentRepository.findByRoadId(roadId).isPresent()) {
                             RoadSegment segment = new RoadSegment();
                             segment.setRoadId(roadId);
                             segment.setName(null);
-                            segment.setRegion(null);
+                            segment.setRegion(getRegionByRoadId(roadId));
                             roadSegmentRepository.save(segment);
                         }
                     }
                     
+                    logger.info("Created {} road segments", source.getTotalRoads());
                     break;
                 }
             }
@@ -128,6 +135,8 @@ public class ImportService {
             }
             job.setFinishedAt(System.currentTimeMillis());
             importJobRepository.save(job);
+            
+            logger.info("Import job {} completed", job.getId());
             
         } catch (Exception e) {
             logger.error("Import error", e);
@@ -162,5 +171,19 @@ public class ImportService {
     
     public List<FileBasedSpeedRepository.DataSource> getDataSources() {
         return fileBasedSpeedRepository.getDataSources();
+    }
+    
+    private String getRegionByRoadId(Integer roadId) {
+        if (roadId <= 50) {
+            return "朝阳区";
+        } else if (roadId <= 100) {
+            return "海淀区";
+        } else if (roadId <= 150) {
+            return "西城区";
+        } else if (roadId <= 200) {
+            return "东城区";
+        } else {
+            return "丰台区";
+        }
     }
 }

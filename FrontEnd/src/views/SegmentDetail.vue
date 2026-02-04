@@ -109,7 +109,7 @@ const predictionResult = ref<PredictionJob>()
 
 const predictForm = ref<PredictRequest>({
   segmentId: segmentId.value,
-  baseTime: Math.floor(Date.now() / 1000),
+  baseTime: Date.now(),
   horizonSteps: 6
 })
 
@@ -123,20 +123,14 @@ const loadSegment = async () => {
 
 const loadSpeedRecords = async () => {
   try {
-    const now = Date.now()
-    let from: number
-    
-    if (timeRange.value === '24h') {
-      from = now - 24 * 60 * 60 * 1000
-    } else {
-      from = now - 7 * 24 * 60 * 60 * 1000
-    }
-    
     speedRecords.value = await api.speeds.getList({
-      segmentId: segmentId.value,
-      from,
-      to: now
+      segmentId: segmentId.value
     })
+    
+    if (speedRecords.value.length > 0) {
+      const middleIndex = Math.floor(speedRecords.value.length / 2)
+      predictForm.value.baseTime = speedRecords.value[middleIndex].ts
+    }
   } catch (error) {
     ElMessage.error('加载速度数据失败')
   }

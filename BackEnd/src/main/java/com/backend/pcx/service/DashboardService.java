@@ -106,6 +106,8 @@ public class DashboardService {
                 .collect(Collectors.toList());
         
         CongestionLevelDistribution distribution = new CongestionLevelDistribution(0, 0, 0);
+        
+        Map<String, RegionCongestion> regionMap = new HashMap<>();
         for (Map.Entry<Long, Double> entry : segmentAvgSpeeds.entrySet()) {
             CongestionLevel level = CongestionLevel.fromSpeed(
                     entry.getValue(), freeSpeedThreshold, flowingSpeedThreshold);
@@ -120,9 +122,33 @@ public class DashboardService {
                     distribution.setCongestedCount(distribution.getCongestedCount() + 1);
                     break;
             }
+            
+            RoadSegment segment = allSegments.stream()
+                    .filter(s -> s.getId().equals(entry.getKey()))
+                    .findFirst()
+                    .orElse(null);
+            if (segment != null && segment.getRegion() != null) {
+                String region = segment.getRegion();
+                RegionCongestion regionCongestion = regionMap.get(region);
+                if (regionCongestion == null) {
+                    regionCongestion = new RegionCongestion(region, 0, 0, 0);
+                    regionMap.put(region, regionCongestion);
+                }
+                switch (level) {
+                    case FREE:
+                        regionCongestion.setFreeCount(regionCongestion.getFreeCount() + 1);
+                        break;
+                    case FLOWING:
+                        regionCongestion.setFlowingCount(regionCongestion.getFlowingCount() + 1);
+                        break;
+                    case CONGESTED:
+                        regionCongestion.setCongestedCount(regionCongestion.getCongestedCount() + 1);
+                        break;
+                }
+            }
         }
         
-        List<RegionCongestion> regionCongestions = new ArrayList<>();
+        List<RegionCongestion> regionCongestions = new ArrayList<>(regionMap.values());
         
         return new DashboardSummary(
                 todayAvgSpeed,

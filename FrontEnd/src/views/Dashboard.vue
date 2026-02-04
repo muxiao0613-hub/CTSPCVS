@@ -151,12 +151,8 @@ const loadSpeedRecords = async () => {
   if (!selectedSegmentId.value) return
   
   try {
-    const now = Date.now()
-    const oneDayAgo = now - 24 * 60 * 60 * 1000
     speedRecords.value = await api.speeds.getList({
-      segmentId: selectedSegmentId.value,
-      from: oneDayAgo,
-      to: now
+      segmentId: selectedSegmentId.value
     })
   } catch (error) {
     ElMessage.error('加载速度数据失败')
