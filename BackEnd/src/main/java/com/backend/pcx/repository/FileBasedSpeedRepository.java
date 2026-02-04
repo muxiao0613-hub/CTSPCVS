@@ -133,7 +133,7 @@ public class FileBasedSpeedRepository {
         
         List<SpeedDataPoint> data = loadFromFiles(roadId);
         
-        if (!data.isEmpty()) {
+        if (data.isEmpty()) {
             return data;
         }
         

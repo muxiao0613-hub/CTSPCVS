@@ -3,9 +3,12 @@ package com.backend.pcx.service;
 import com.backend.pcx.dto.ImportJobDTO;
 import com.backend.pcx.entity.ImportJob;
 import com.backend.pcx.entity.RoadSegment;
+import com.backend.pcx.entity.SegmentStatistics;
+import com.backend.pcx.entity.CongestionLevel;
 import com.backend.pcx.repository.FileBasedSpeedRepository;
 import com.backend.pcx.repository.ImportJobRepository;
 import com.backend.pcx.repository.RoadSegmentRepository;
+import com.backend.pcx.repository.SegmentStatisticsRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,18 +34,27 @@ public class ImportService {
     private final ImportJobRepository importJobRepository;
     private final RoadSegmentRepository roadSegmentRepository;
     private final FileBasedSpeedRepository fileBasedSpeedRepository;
+    private final SegmentStatisticsRepository segmentStatisticsRepository;
     
     @Value("${app.data-dir:./data}")
     private String dataDir;
+    
+    @Value("${traffic.prediction.free-speed-threshold:40}")
+    private Double freeSpeedThreshold;
+    
+    @Value("${traffic.prediction.flowing-speed-threshold:25}")
+    private Double flowingSpeedThreshold;
     
     private final Map<Long, ImportJob> jobCache = new ConcurrentHashMap<>();
 
     public ImportService(ImportJobRepository importJobRepository,
                          RoadSegmentRepository roadSegmentRepository,
-                         FileBasedSpeedRepository fileBasedSpeedRepository) {
+                         FileBasedSpeedRepository fileBasedSpeedRepository,
+                         SegmentStatisticsRepository segmentStatisticsRepository) {
         this.importJobRepository = importJobRepository;
         this.roadSegmentRepository = roadSegmentRepository;
         this.fileBasedSpeedRepository = fileBasedSpeedRepository;
+        this.segmentStatisticsRepository = segmentStatisticsRepository;
     }
 
     @Transactional
@@ -119,9 +131,34 @@ public class ImportService {
                             segment.setRegion(getRegionByRoadId(roadId));
                             roadSegmentRepository.save(segment);
                         }
+                        
+                        List<FileBasedSpeedRepository.SpeedDataPoint> data = 
+                                fileBasedSpeedRepository.getSpeedData(roadId, null, null, false);
+                        
+                        if (!data.isEmpty()) {
+                            double avgSpeed = data.stream()
+                                    .mapToDouble(FileBasedSpeedRepository.SpeedDataPoint::getSpeed)
+                                    .average()
+                                    .orElse(0.0);
+                            
+                            CongestionLevel level = CongestionLevel.fromSpeed(
+                                    avgSpeed, freeSpeedThreshold, flowingSpeedThreshold);
+                            
+                            SegmentStatistics stats = new SegmentStatistics();
+                            stats.setRoadId(roadId);
+                            stats.setName("路段" + roadId);
+                            stats.setRegion(getRegionByRoadId(roadId));
+                            stats.setAvgSpeed(avgSpeed);
+                            stats.setDataPointCount(data.size());
+                            stats.setCongestionLevel(level.name());
+                            stats.setCreatedAt(System.currentTimeMillis());
+                            stats.setUpdatedAt(System.currentTimeMillis());
+                            
+                            segmentStatisticsRepository.save(stats);
+                        }
                     }
                     
-                    logger.info("Created {} road segments", source.getTotalRoads());
+                    logger.info("Created {} road segments and statistics", source.getTotalRoads());
                     break;
                 }
             }
