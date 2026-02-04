@@ -308,4 +308,46 @@ public class FileBasedSpeedRepository {
         cache.clear();
         lastAccessTime.clear();
     }
+    
+    public Set<Integer> getAllRoadIds() {
+        Set<Integer> allRoadIds = new HashSet<>();
+        
+        try {
+            Path dirPath = Paths.get(dataDir);
+            if (!Files.exists(dirPath)) {
+                return allRoadIds;
+            }
+            
+            Files.list(dirPath)
+                    .filter(p -> p.toString().endsWith(".csv") && p.toString().contains("speeddata"))
+                    .forEach(p -> {
+                        Set<Integer> roadIdsInFile = getRoadIdsFromFile(p.toString());
+                        allRoadIds.addAll(roadIdsInFile);
+                    });
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        
+        return allRoadIds;
+    }
+    
+    private Set<Integer> getRoadIdsFromFile(String filePath) {
+        Set<Integer> roadIds = new HashSet<>();
+        try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
+            String line = reader.readLine();
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split(",");
+                if (parts.length >= 1) {
+                    try {
+                        roadIds.add(Integer.parseInt(parts[0].trim()));
+                    } catch (NumberFormatException e) {
+                        continue;
+                    }
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return roadIds;
+    }
 }

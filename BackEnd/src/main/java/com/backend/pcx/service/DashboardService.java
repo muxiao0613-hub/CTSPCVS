@@ -5,21 +5,20 @@ import com.backend.pcx.dto.CongestionLevelDistribution;
 import com.backend.pcx.dto.DashboardSummary;
 import com.backend.pcx.dto.RegionCongestion;
 import com.backend.pcx.entity.CongestionLevel;
-import com.backend.pcx.entity.RoadSegment;
 import com.backend.pcx.repository.FileBasedSpeedRepository;
-import com.backend.pcx.repository.RoadSegmentRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
 public class DashboardService {
     
-    private final RoadSegmentRepository roadSegmentRepository;
+    private static final Logger logger = LoggerFactory.getLogger(DashboardService.class);
+    
     private final FileBasedSpeedRepository fileBasedSpeedRepository;
     
     @Value("${traffic.prediction.free-speed-threshold:40}")
@@ -28,18 +27,18 @@ public class DashboardService {
     @Value("${traffic.prediction.flowing-speed-threshold:25}")
     private Double flowingSpeedThreshold;
 
-    public DashboardService(RoadSegmentRepository roadSegmentRepository,
-                             FileBasedSpeedRepository fileBasedSpeedRepository) {
-        this.roadSegmentRepository = roadSegmentRepository;
+    public DashboardService(FileBasedSpeedRepository fileBasedSpeedRepository) {
         this.fileBasedSpeedRepository = fileBasedSpeedRepository;
     }
 
     public DashboardSummary getSummary() {
-        List<RoadSegment> allSegments = roadSegmentRepository.findAll();
+        logger.info("开始获取仪表盘数据");
         
-        Map<Long, Double> segmentAvgSpeeds = new HashMap<>();
-        for (RoadSegment segment : allSegments) {
-            Integer roadId = segment.getRoadId();
+        Set<Integer> allRoadIds = fileBasedSpeedRepository.getAllRoadIds();
+        logger.info("找到 {} 个路段", allRoadIds.size());
+        
+        Map<Integer, Double> segmentAvgSpeeds = new HashMap<>();
+        for (Integer roadId : allRoadIds) {
             List<FileBasedSpeedRepository.SpeedDataPoint> data = 
                     fileBasedSpeedRepository.getSpeedData(roadId, null, null, false);
             
@@ -48,34 +47,36 @@ public class DashboardService {
                         .mapToDouble(FileBasedSpeedRepository.SpeedDataPoint::getSpeed)
                         .average()
                         .orElse(0.0);
-                segmentAvgSpeeds.put(segment.getId(), avgSpeed);
+                segmentAvgSpeeds.put(roadId, avgSpeed);
             }
         }
+        
+        logger.info("成功计算 {} 个路段的平均速度", segmentAvgSpeeds.size());
         
         Double todayAvgSpeed = segmentAvgSpeeds.values().stream()
                 .mapToDouble(Double::doubleValue)
                 .average()
                 .orElse(0.0);
         
+        logger.info("全部数据均速: {}", todayAvgSpeed);
+        
         long congestedCount = segmentAvgSpeeds.values().stream()
                 .filter(speed -> speed < flowingSpeedThreshold)
                 .count();
         
+        logger.info("拥堵路段数: {}", congestedCount);
+        
         CongestedSegment mostCongested = segmentAvgSpeeds.entrySet().stream()
                 .min(Map.Entry.comparingByValue())
                 .map(entry -> {
-                    RoadSegment segment = allSegments.stream()
-                            .filter(s -> s.getId().equals(entry.getKey()))
-                            .findFirst()
-                            .orElse(null);
-                    if (segment == null) return null;
+                    Integer roadId = entry.getKey();
                     CongestionLevel level = CongestionLevel.fromSpeed(
                             entry.getValue(), freeSpeedThreshold, flowingSpeedThreshold);
                     return new CongestedSegment(
-                            segment.getId(),
-                            segment.getRoadId(),
-                            segment.getName(),
-                            segment.getRegion(),
+                            null,
+                            roadId,
+                            "路段" + roadId,
+                            getRegionByRoadId(roadId),
                             entry.getValue(),
                             level
                     );
@@ -86,18 +87,14 @@ public class DashboardService {
                 .sorted(Map.Entry.comparingByValue())
                 .limit(5)
                 .map(entry -> {
-                    RoadSegment segment = allSegments.stream()
-                            .filter(s -> s.getId().equals(entry.getKey()))
-                            .findFirst()
-                            .orElse(null);
-                    if (segment == null) return null;
+                    Integer roadId = entry.getKey();
                     CongestionLevel level = CongestionLevel.fromSpeed(
                             entry.getValue(), freeSpeedThreshold, flowingSpeedThreshold);
                     return new CongestedSegment(
-                            segment.getId(),
-                            segment.getRoadId(),
-                            segment.getName(),
-                            segment.getRegion(),
+                            null,
+                            roadId,
+                            "路段" + roadId,
+                            getRegionByRoadId(roadId),
                             entry.getValue(),
                             level
                     );
@@ -108,7 +105,7 @@ public class DashboardService {
         CongestionLevelDistribution distribution = new CongestionLevelDistribution(0, 0, 0);
         
         Map<String, RegionCongestion> regionMap = new HashMap<>();
-        for (Map.Entry<Long, Double> entry : segmentAvgSpeeds.entrySet()) {
+        for (Map.Entry<Integer, Double> entry : segmentAvgSpeeds.entrySet()) {
             CongestionLevel level = CongestionLevel.fromSpeed(
                     entry.getValue(), freeSpeedThreshold, flowingSpeedThreshold);
             switch (level) {
@@ -123,28 +120,22 @@ public class DashboardService {
                     break;
             }
             
-            RoadSegment segment = allSegments.stream()
-                    .filter(s -> s.getId().equals(entry.getKey()))
-                    .findFirst()
-                    .orElse(null);
-            if (segment != null && segment.getRegion() != null) {
-                String region = segment.getRegion();
-                RegionCongestion regionCongestion = regionMap.get(region);
-                if (regionCongestion == null) {
-                    regionCongestion = new RegionCongestion(region, 0, 0, 0);
-                    regionMap.put(region, regionCongestion);
-                }
-                switch (level) {
-                    case FREE:
-                        regionCongestion.setFreeCount(regionCongestion.getFreeCount() + 1);
-                        break;
-                    case FLOWING:
-                        regionCongestion.setFlowingCount(regionCongestion.getFlowingCount() + 1);
-                        break;
-                    case CONGESTED:
-                        regionCongestion.setCongestedCount(regionCongestion.getCongestedCount() + 1);
-                        break;
-                }
+            String region = getRegionByRoadId(entry.getKey());
+            RegionCongestion regionCongestion = regionMap.get(region);
+            if (regionCongestion == null) {
+                regionCongestion = new RegionCongestion(region, 0, 0, 0);
+                regionMap.put(region, regionCongestion);
+            }
+            switch (level) {
+                case FREE:
+                    regionCongestion.setFreeCount(regionCongestion.getFreeCount() + 1);
+                    break;
+                case FLOWING:
+                    regionCongestion.setFlowingCount(regionCongestion.getFlowingCount() + 1);
+                    break;
+                case CONGESTED:
+                    regionCongestion.setCongestedCount(regionCongestion.getCongestedCount() + 1);
+                    break;
             }
         }
         
@@ -158,5 +149,19 @@ public class DashboardService {
                 topCongested,
                 distribution
         );
+    }
+    
+    private String getRegionByRoadId(Integer roadId) {
+        if (roadId <= 50) {
+            return "朝阳区";
+        } else if (roadId <= 100) {
+            return "海淀区";
+        } else if (roadId <= 150) {
+            return "西城区";
+        } else if (roadId <= 200) {
+            return "东城区";
+        } else {
+            return "丰台区";
+        }
     }
 }

@@ -3,7 +3,7 @@
     <el-row :gutter="20" class="kpi-row">
       <el-col :span="6">
         <KpiCard
-          label="今日均速"
+          label="全部数据均速"
           :value="summary.todayAvgSpeed?.toFixed(1) || '0'"
           unit="km/h"
           :icon="TrendCharts"
